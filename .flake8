@@ -90,6 +90,8 @@ ignore =
   N802,
   ; Do not perform function calls in argument defaults.
   B008,
+  ; Found protected attribute
+  WPS437,
 
   ; all init files
   __init__.py:
