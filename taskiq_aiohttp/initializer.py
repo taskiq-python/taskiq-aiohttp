@@ -1,6 +1,6 @@
 import asyncio
 import inspect
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable
 
 import yarl
 from aiohttp import web
@@ -16,6 +16,7 @@ from taskiq.cli.utils import import_object
 def startup_event_generator(
     broker: AsyncBroker,
     app_path: str,
+    app: Any,
 ) -> Callable[[TaskiqState], Awaitable[None]]:
     """
     Creates an event to run on broker's startup.
@@ -27,7 +28,8 @@ def startup_event_generator(
     act the same as the real application.
 
     :param broker: current broker.
-    :param app_path: string with a path to an application or a factory.
+    :param app_path: path to the application.
+    :param app: current application or a fractory.
 
     :returns: a function that is called on startup.
     """
@@ -35,16 +37,16 @@ def startup_event_generator(
     async def startup(state: TaskiqState) -> None:
         loop = asyncio.get_event_loop()
 
-        app = import_object(app_path)
+        local_app = app
 
-        if not isinstance(app, web.Application):
-            app = app()
+        if not isinstance(local_app, web.Application):
+            local_app = local_app()
 
-        if inspect.iscoroutine(app):
-            app = await app
+        if inspect.iscoroutine(local_app):
+            local_app = await local_app
 
-        if not isinstance(app, web.Application):
-            raise ValueError(f"'{app_path}' is not an AioHTTP application.")
+        if not isinstance(local_app, web.Application):
+            raise ValueError(f"{app_path} is not an AioHTTP application.")
 
         handler = RequestHandler(app._make_handler(), loop=loop)
         handler.transport = asyncio.Transport()
@@ -121,9 +123,11 @@ def init(broker: AsyncBroker, app_path: str) -> None:
     if not broker.is_worker_process:
         return
 
+    app = import_object(app_path)
+
     broker.add_event_handler(
         TaskiqEvents.WORKER_STARTUP,
-        startup_event_generator(broker, app_path),
+        startup_event_generator(broker, app_path, app),
     )
     broker.add_event_handler(
         TaskiqEvents.WORKER_SHUTDOWN,
