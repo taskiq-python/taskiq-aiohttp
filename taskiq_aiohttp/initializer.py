@@ -48,7 +48,7 @@ def startup_event_generator(
         if not isinstance(local_app, web.Application):
             raise ValueError(f"{app_path} is not an AioHTTP application.")
 
-        handler = RequestHandler(app._make_handler(), loop=loop)
+        handler = RequestHandler(local_app._make_handler(), loop=loop)
         handler.transport = asyncio.Transport()
         request = web.Request(
             RawRequestMessage(
@@ -78,19 +78,19 @@ def startup_event_generator(
             match_dict={},
             route=SystemRoute(web.HTTPBadRequest()),
         )
-        request._match_info._apps = app._subapps
-        request._match_info._current_app = app
+        request._match_info._apps = local_app._subapps
+        request._match_info._current_app = local_app
 
         broker.add_dependency_context(
             {
-                web.Application: app,
+                web.Application: local_app,
                 web.Request: request,
             },
         )
 
-        state.aiohttp_app = app
-        app.router._resources = []
-        await app.startup()
+        state.aiohttp_app = local_app
+        local_app.router._resources = []
+        await local_app.startup()
 
     return startup
 
