@@ -44,11 +44,18 @@ def startup_event_generator(
 
         if inspect.iscoroutine(local_app):
             local_app = await local_app
-
         if not isinstance(local_app, web.Application):
             raise ValueError(f"{app_path} is not an AioHTTP application.")
 
-        handler = RequestHandler(local_app._make_handler(), loop=loop)
+        # Starting the application.
+        app_runner = web.AppRunner(local_app)
+        await app_runner.setup()
+
+        if app_runner.server is None:
+            raise ValueError("Cannot construct aiohttp app to mock requests")
+
+        # Creating mocked request
+        handler = RequestHandler(app_runner.server, loop=loop)
         handler.transport = asyncio.Transport()
         request = web.Request(
             RawRequestMessage(
@@ -88,9 +95,8 @@ def startup_event_generator(
             },
         )
 
-        state.aiohttp_app = local_app
+        state.aiohttp_runner = app_runner
         local_app.router._resources = []
-        await local_app.startup()
 
     return startup
 
@@ -104,8 +110,8 @@ async def shutdown(state: TaskiqState) -> None:
 
     :param state: current state.
     """
-    await state.aiohttp_app.shutdown()
-    await state.aiohttp_app.cleanup()
+    await state.aiohttp_runner.shutdown()
+    await state.aiohttp_runner.cleanup()
 
 
 def init(broker: AsyncBroker, app_path: str) -> None:
