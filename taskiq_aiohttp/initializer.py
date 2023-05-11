@@ -51,6 +51,9 @@ def startup_event_generator(
         app_runner = web.AppRunner(local_app)
         await app_runner.setup()
 
+        if app_runner.server is None:
+            raise ValueError("Cannot construct aiohttp app to mock requests")
+
         # Creating mocked request
         handler = RequestHandler(app_runner.server, loop=loop)
         handler.transport = asyncio.Transport()
