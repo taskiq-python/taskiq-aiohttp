@@ -13,6 +13,64 @@ from taskiq import AsyncBroker, TaskiqEvents, TaskiqState
 from taskiq.cli.utils import import_object
 
 
+def populate_context(
+    broker: AsyncBroker,
+    server: web.Server,
+    app: web.Application,
+    loop: asyncio.AbstractEventLoop,
+) -> None:
+    """
+    Function to add dependency context.
+
+    This function adds base dependency,
+    that you may need while working with AioHTTP application.
+
+    :param broker: current broker.
+    :param server: current server that handles requests.
+    :param app: your application.
+    :param loop: current event loop.
+    """
+    handler = RequestHandler(server, loop=loop)
+    handler.transport = asyncio.Transport()
+    request = web.Request(
+        RawRequestMessage(
+            "GET",
+            "/",
+            HttpVersion10,
+            headers=CIMultiDictProxy(CIMultiDict()),
+            raw_headers=(),
+            should_close=False,
+            upgrade=False,
+            chunked=False,
+            compression=None,
+            url=yarl.URL.build(
+                scheme="https",
+                host="test.com",
+                path="/",
+            ),
+        ),
+        None,
+        handler,
+        None,
+        None,
+        None,
+    )
+
+    request._match_info = UrlMappingMatchInfo(
+        match_dict={},
+        route=SystemRoute(web.HTTPBadRequest()),
+    )
+    request._match_info._apps = app._subapps
+    request._match_info._current_app = app
+
+    broker.add_dependency_context(
+        {
+            web.Application: app,
+            web.Request: request,
+        },
+    )
+
+
 def startup_event_generator(
     broker: AsyncBroker,
     app_path: str,
@@ -35,8 +93,6 @@ def startup_event_generator(
     """
 
     async def startup(state: TaskiqState) -> None:
-        loop = asyncio.get_event_loop()
-
         local_app = app
 
         if not isinstance(local_app, web.Application):
@@ -54,47 +110,16 @@ def startup_event_generator(
         if app_runner.server is None:
             raise ValueError("Cannot construct aiohttp app to mock requests")
 
+        loop = asyncio.get_running_loop()
+
+        populate_context(
+            broker=broker,
+            server=app_runner.server,
+            app=local_app,
+            loop=loop,
+        )
+
         # Creating mocked request
-        handler = RequestHandler(app_runner.server, loop=loop)
-        handler.transport = asyncio.Transport()
-        request = web.Request(
-            RawRequestMessage(
-                "GET",
-                "/",
-                HttpVersion10,
-                headers=CIMultiDictProxy(CIMultiDict()),
-                raw_headers=(),
-                should_close=False,
-                upgrade=False,
-                chunked=False,
-                compression=None,
-                url=yarl.URL.build(
-                    scheme="https",
-                    host="test.com",
-                    path="/",
-                ),
-            ),
-            None,
-            handler,
-            None,
-            None,
-            None,
-        )
-
-        request._match_info = UrlMappingMatchInfo(
-            match_dict={},
-            route=SystemRoute(web.HTTPBadRequest()),
-        )
-        request._match_info._apps = local_app._subapps
-        request._match_info._current_app = local_app
-
-        broker.add_dependency_context(
-            {
-                web.Application: local_app,
-                web.Request: request,
-            },
-        )
-
         state.aiohttp_runner = app_runner
         local_app.router._resources = []
 
