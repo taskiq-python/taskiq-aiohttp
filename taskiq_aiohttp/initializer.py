@@ -151,11 +151,6 @@ def init(broker: AsyncBroker, app_path: str) -> None:
     :param broker: current broker.
     :param app_path: string with a path to an application or a factory.
     """
-    # We just import app to discover tasks
-    # for schedule.
-    if broker.is_scheduler_process:
-        app = import_object(app_path)
-
     if not broker.is_worker_process:
         return
 
