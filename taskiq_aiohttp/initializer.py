@@ -1,6 +1,6 @@
 import asyncio
 import inspect
-from typing import Any, Awaitable, Callable
+from typing import Awaitable, Callable
 
 import yarl
 from aiohttp import web
@@ -71,10 +71,9 @@ def populate_context(
     )
 
 
-def startup_event_generator(
+def startup_event_generator(  # noqa: C901
     broker: AsyncBroker,
     app_path: str,
-    app: Any,
 ) -> Callable[[TaskiqState], Awaitable[None]]:
     """
     Creates an event to run on broker's startup.
@@ -87,24 +86,26 @@ def startup_event_generator(
 
     :param broker: current broker.
     :param app_path: path to the application.
-    :param app: current application or a fractory.
 
     :returns: a function that is called on startup.
     """
 
     async def startup(state: TaskiqState) -> None:
-        local_app = app
+        if not broker.is_worker_process:
+            return
 
-        if not isinstance(local_app, web.Application):
-            local_app = local_app()
+        app = import_object(app_path)
 
-        if inspect.iscoroutine(local_app):
-            local_app = await local_app
-        if not isinstance(local_app, web.Application):
+        if not isinstance(app, web.Application):
+            app = app()
+
+        if inspect.iscoroutine(app):
+            app = await app
+        if not isinstance(app, web.Application):
             raise ValueError(f"{app_path} is not an AioHTTP application.")
 
         # Starting the application.
-        app_runner = web.AppRunner(local_app)
+        app_runner = web.AppRunner(app)
         await app_runner.setup()
 
         if app_runner.server is None:
@@ -115,28 +116,35 @@ def startup_event_generator(
         populate_context(
             broker=broker,
             server=app_runner.server,
-            app=local_app,
+            app=app,
             loop=loop,
         )
 
         # Creating mocked request
         state.aiohttp_runner = app_runner
-        local_app.router._resources = []
+        app.router._resources = []
 
     return startup
 
 
-async def shutdown(state: TaskiqState) -> None:
+def shutdown_generator(broker: AsyncBroker) -> Callable[[TaskiqState], Awaitable[None]]:
     """
-    Shuts down the app.
+    Shuts down event generator.
 
-    It just gets the application
-    we created in startup and shuts it down.
+    This function generates a shutdown broker
 
-    :param state: current state.
+    :param broker: current broker.
+    :returns: shutdown event handler.
     """
-    await state.aiohttp_runner.shutdown()
-    await state.aiohttp_runner.cleanup()
+
+    async def shutdown(state: TaskiqState) -> None:
+        if not broker.is_worker_process:
+            return
+
+        await state.aiohttp_runner.shutdown()
+        await state.aiohttp_runner.cleanup()
+
+    return shutdown
 
 
 def init(broker: AsyncBroker, app_path: str) -> None:
@@ -151,16 +159,11 @@ def init(broker: AsyncBroker, app_path: str) -> None:
     :param broker: current broker.
     :param app_path: string with a path to an application or a factory.
     """
-    if not broker.is_worker_process:
-        return
-
-    app = import_object(app_path)
-
     broker.add_event_handler(
         TaskiqEvents.WORKER_STARTUP,
-        startup_event_generator(broker, app_path, app),
+        startup_event_generator(broker, app_path),
     )
     broker.add_event_handler(
         TaskiqEvents.WORKER_SHUTDOWN,
-        shutdown,
+        shutdown_generator(broker),
     )
