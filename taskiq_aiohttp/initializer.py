@@ -96,11 +96,14 @@ def startup_event_generator(  # noqa: C901
 
         app = import_object(app_path)
 
-        if not isinstance(app, web.Application):
+        if inspect.iscoroutinefunction(app):
+            app = await app()
+        elif inspect.isfunction(app):
             app = app()
 
-        if inspect.iscoroutine(app):
-            app = await app
+        if isinstance(app, web.AppRunner):
+            app = app.app
+
         if not isinstance(app, web.Application):
             raise ValueError(f"{app_path} is not an AioHTTP application.")
 
